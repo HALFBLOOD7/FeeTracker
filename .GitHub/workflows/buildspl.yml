@@ -28,19 +28,51 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Verify ZIP exists
+        run: |
+          test -f fee-tracker-build.zip || {
+            echo "ERROR: fee-tracker-build.zip not found in repository root"
+            ls -la
+            exit 1
+          }
+
       - name: Extract Android project
         run: |
+          mkdir -p extracted
           unzip -q fee-tracker-build.zip -d extracted
+          find extracted -maxdepth 4 \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print
+
+      - name: Locate Android project
+        id: project
+        shell: bash
+        run: |
+          SETTINGS="$(find extracted -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)"
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No Gradle settings file found in ZIP"
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS")"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Using project directory: $PROJECT_DIR"
 
       - name: Build APK
         run: |
           gradle --no-daemon \
-            -p extracted/fee-tracker-build \
-            assembleDebug
+            -p "${{ steps.project.outputs.dir }}" \
+            assembleDebug --stacktrace
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: fee-tracker-apk
-          path: extracted/fee-tracker-build/app/build/outputs/apk/debug/*.apk
+          path: |
+            ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
